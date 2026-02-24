@@ -18,7 +18,7 @@
 #define BLOCK_SIZE 16  /* max seq len */
 #define HEAD_DIM (N_EMBD / N_HEAD)
 
-#define TRAIN_STEPS 10
+#define TRAIN_STEPS 1000
 #define LR 0.01
 #define BETA1 0.85
 #define BETA2 0.99
