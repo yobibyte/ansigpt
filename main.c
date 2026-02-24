@@ -18,7 +18,7 @@
 #define BLOCK_SIZE 16  /* max seq len */
 #define HEAD_DIM (N_EMBD / N_HEAD)
 
-#define TRAIN_STEPS 1000
+#define TRAIN_STEPS 10
 #define LR 0.01
 #define BETA1 0.85
 #define BETA2 0.99
@@ -82,9 +82,9 @@ Value *v_from_double(double d, ValuePool *pool) {
 }
 
 Value *v_add(Value *v, Value *other) {
-    /* TODO: using the pool here adds weird artifacts to names. Figure out why.*/
-    /* Value *res = v_from_double(v->data + other->data, &comp_pool); */
-    Value *res = malloc(sizeof(Value));
+    Value *res = v_from_double(v->data + other->data, &comp_pool);
+    res->grad = 0;
+    res->visited = 0;
     res->data = v->data + other->data;
     res->num_children = 2;
     res->children[0] = v;
@@ -95,7 +95,7 @@ Value *v_add(Value *v, Value *other) {
 }
 
 Value *v_sum(Value **v, size_t n) {
-    Value *res = &comp_pool.data[comp_pool.idx++];
+    Value *res = v_from_double(0., &comp_pool);
     size_t i;
     for(i = 0; i < n; i++) {
         res = v_add(res, v[i]);
@@ -244,6 +244,11 @@ Matrix *get_weight_matrix(size_t rows, size_t cols) {
     return mat;
 }
 
+void free_mat(Matrix *mat) {
+    free(mat->data);
+    free(mat);
+}
+
 typedef struct {
     Matrix *attn_wq;
     Matrix *attn_wk;
@@ -291,17 +296,17 @@ Network *init_network(size_t vocab_size) {
 
 void free_network(Network *net) {
     size_t layer_idx;
-    free(net->wte);
-    free(net->wpe);
-    free(net->lm_head);
+    free_mat(net->wte);
+    free_mat(net->wpe);
+    free_mat(net->lm_head);
     /* We do not need to free the Value items as they are in the pool.*/
     for(layer_idx = 0; layer_idx < N_LAYER; layer_idx++) {
-        free(net->layers[layer_idx]->attn_wq);
-        free(net->layers[layer_idx]->attn_wk);
-        free(net->layers[layer_idx]->attn_wv);
-        free(net->layers[layer_idx]->attn_wo);
-        free(net->layers[layer_idx]->mlp_fc1);
-        free(net->layers[layer_idx]->mlp_fc2);
+        free_mat(net->layers[layer_idx]->attn_wq);
+        free_mat(net->layers[layer_idx]->attn_wk);
+        free_mat(net->layers[layer_idx]->attn_wv);
+        free_mat(net->layers[layer_idx]->attn_wo);
+        free_mat(net->layers[layer_idx]->mlp_fc1);
+        free_mat(net->layers[layer_idx]->mlp_fc2);
         free(net->layers[layer_idx]);
     }
     free(net->layers);
