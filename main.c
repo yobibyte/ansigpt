@@ -18,7 +18,7 @@
 #define BLOCK_SIZE 16  /* max seq len */
 #define HEAD_DIM (N_EMBD / N_HEAD)
 
-#define TRAIN_STEPS 10
+#define TRAIN_STEPS 1000
 #define LR 0.01
 #define BETA1 0.85
 #define BETA2 0.99
@@ -82,7 +82,10 @@ Value *v_from_double(double d, ValuePool *pool) {
 }
 
 Value *v_add(Value *v, Value *other) {
-    Value *res = v_from_double(v->data + other->data, &comp_pool);
+    /* TODO: using the pool here adds weird artifacts to names. Figure out why.*/
+    /* Value *res = v_from_double(v->data + other->data, &comp_pool); */
+    Value *res = malloc(sizeof(Value));
+    res->data = v->data + other->data;
     res->num_children = 2;
     res->children[0] = v;
     res->children[1] = other;
@@ -302,6 +305,7 @@ void free_network(Network *net) {
         free(net->layers[layer_idx]->mlp_fc2);
         free(net->layers[layer_idx]);
     }
+    free(net->layers);
     free(net);
 }
 
