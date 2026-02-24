@@ -579,20 +579,25 @@ void gpt(size_t token_id, size_t pos_id, Network *net, Value *keys[N_LAYER][BLOC
             size_t hs = head_idx * HEAD_DIM;
             
             Value **attn_weights = malloc(sizeof(Value*) * (pos_id + 1));
+            Value **head_attn_weights = malloc(sizeof(Value*) * (pos_id +1));
+            Value **tmp;
             for(it = 0; it <= pos_id; it++) {
                 for(id = 0; id < HEAD_DIM; id++) {
                     qk_prod[id] = v_mul(q[hs + id], keys[layer_idx][it][hs + id]);
                 }
                 attn_weights[it] = v_double_div(v_sum(qk_prod, HEAD_DIM), pow(HEAD_DIM, 0.5));
             }
-            attn_weights = v_softmax(attn_weights, pos_id + 1);
+            tmp = v_softmax(attn_weights, pos_id + 1);
+            memcpy(attn_weights, tmp, sizeof(Value*)*(pos_id + 1));
+            free(tmp);
             for(id = 0; id < HEAD_DIM; id++) {
-                Value **head_attn_weights = malloc(sizeof(Value*) * (pos_id +1));
                 for(it = 0; it <= pos_id; it++) {
                     head_attn_weights[it] = v_mul(attn_weights[it], values[layer_idx][it][hs + id]);
                 }
                 x_attn[hs + id] = v_sum(head_attn_weights, pos_id + 1);
             }
+            free(attn_weights);
+            free(head_attn_weights);
         }
         v_linear(x_attn, layer->attn_wo, N_EMBD, N_EMBD, x);
         for(i = 0; i < N_EMBD; i++) {
@@ -657,8 +662,11 @@ int main() {
         tokens = tokenize(cur_data, &tok);
 
         for(i = 0; i < n - 1; i++) {
+            Value **tmp;
             gpt(tokens[i], i, net, keys, values, tok.vocab_size, logits);
-            memcpy(logits, v_softmax(logits, tok.vocab_size), sizeof(Value*)*MAX_VOCAB);
+            tmp = v_softmax(logits, tok.vocab_size);
+            memcpy(logits, tmp, sizeof(Value*)*MAX_VOCAB);
+            free(tmp);
             loss = v_add(loss, v_neg(v_log(logits[tokens[i+1]])));
         }
         loss = v_double_div(loss, n);
@@ -696,11 +704,14 @@ int main() {
             token_id = tok.bos;
 
             for(i = 0; i < BLOCK_SIZE; i++) {
+                Value **tmp;
                 gpt(token_id, i, net, keys, values, tok.vocab_size, logits);
                 for(j = 0; j < tok.vocab_size; j++) {
                     logits[j] = v_double_div(logits[j], TEMPERATURE); 
                 }
-                memcpy(logits, v_softmax(logits, tok.vocab_size), sizeof(Value*)*MAX_VOCAB);
+                tmp = v_softmax(logits, tok.vocab_size);
+                memcpy(logits, tmp, sizeof(Value*)*MAX_VOCAB);
+                free(tmp);
                 for(j = 0; j < tok.vocab_size; j++) {
                     probs[j] = logits[j]->data;   
                 }
