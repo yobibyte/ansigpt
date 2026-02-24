@@ -27,7 +27,7 @@
 
 #define MAX_VOCAB 100
 #define TEMPERATURE 0.5 
-#define INFERENCE_SAMPLES 20 
+#define INFERENCE_SAMPLES 20
 
 #define TWO_PI (M_PI*2)
 
@@ -486,7 +486,6 @@ size_t get_data(char ***result) {
         }
     }
     fclose(f);
-    data_size--; /* We did not insert for the last increment. */
     shuffle(data, data_size);
     *result = data;
     return data_size;
@@ -527,10 +526,9 @@ Value **v_softmax(Value **logits, size_t n) {
     }
     return res;
 }
-
-Value **v_rmsnorm(Value **x, size_t n) {
+/* We change x in-place. Probably we should do it the same way we fixed softmax. */
+void v_rmsnorm(Value **x, size_t n) {
     size_t i;
-    Value **res = malloc(sizeof(Value*) * n);
     Value *ms = v_from_double(0, &comp_pool);
     for(i = 0; i < n; i++) {
         ms = v_add(ms, v_mul(x[i], x[i]));
@@ -539,9 +537,8 @@ Value **v_rmsnorm(Value **x, size_t n) {
     ms = v_double_add(ms, 1e-5);
     ms = v_double_pow(ms, -0.5); 
     for(i = 0; i < n; i++) {
-        res[i] = v_mul(x[i], ms);
+        x[i] = v_mul(x[i], ms);
     }
-    return res; 
 }
 
 void gpt(size_t token_id, size_t pos_id, Network *net, Value *keys[N_LAYER][BLOCK_SIZE][N_EMBD], Value *values[N_LAYER][BLOCK_SIZE][N_EMBD], size_t vocab_size, Value *logits[MAX_VOCAB]) {
@@ -549,7 +546,7 @@ void gpt(size_t token_id, size_t pos_id, Network *net, Value *keys[N_LAYER][BLOC
      * Here we use t to track that. 
      */
     Value **x = malloc(sizeof(Value*) * N_EMBD);
-    Value **x_residual;
+    Value *x_residual[N_EMBD];
     Value *q[N_EMBD], *v[N_EMBD], *k[N_EMBD];
     Value *qk_prod[HEAD_DIM];
     Value *x_attn[N_HEAD*HEAD_DIM];
@@ -558,13 +555,13 @@ void gpt(size_t token_id, size_t pos_id, Network *net, Value *keys[N_LAYER][BLOC
     for(i = 0; i < N_EMBD; i++) {
         x[i] = v_add(net->wte->data[token_id * net->wte->cols + i], net->wpe->data[pos_id * net->wpe->cols + i]);
     }
-    x = v_rmsnorm(x, N_EMBD);
+    v_rmsnorm(x, N_EMBD);
     for(layer_idx = 0; layer_idx < N_LAYER; layer_idx++) {
         Layer *layer = net->layers[layer_idx];
         size_t head_idx;
 
-        x_residual = x;
-        x = v_rmsnorm(x, N_EMBD);
+        memcpy(x_residual, x, sizeof(Value*)*N_EMBD);
+        v_rmsnorm(x, N_EMBD);
         v_linear(x, layer->attn_wq, N_EMBD, N_EMBD, q);
         v_linear(x, layer->attn_wk, N_EMBD, N_EMBD, k);
         v_linear(x, layer->attn_wv, N_EMBD, N_EMBD, v);
@@ -601,8 +598,8 @@ void gpt(size_t token_id, size_t pos_id, Network *net, Value *keys[N_LAYER][BLOC
         for(i = 0; i < N_EMBD; i++) {
             x[i] = v_add(x[i], x_residual[i]);
         }
-        x_residual = x; /* 2) MLP block */
-        x = v_rmsnorm(x, N_EMBD);
+        memcpy(x_residual, x, sizeof(Value*)*N_EMBD);
+        v_rmsnorm(x, N_EMBD);
         v_linear(x, layer->mlp_fc1, N_EMBD, N_EMBD, x);
         for(i = 0; i < N_EMBD; i++) {
             x[i] = v_relu(x[i]);
@@ -613,6 +610,7 @@ void gpt(size_t token_id, size_t pos_id, Network *net, Value *keys[N_LAYER][BLOC
         }
     }
     v_linear(x, net->lm_head, N_EMBD, vocab_size, logits);
+    free(x);
 }
 
 int main() {
@@ -648,7 +646,6 @@ int main() {
     net = init_network(tok.vocab_size);
     opt = init_adam(net->n_params);
     printf("num params: %lu\n", net->n_params);
-
     for(step = 0; step < TRAIN_STEPS; step++) {
         size_t n, n_toks;
         size_t i;
@@ -663,7 +660,7 @@ int main() {
             Value **tmp;
             gpt(tokens[i], i, net, keys, values, tok.vocab_size, logits);
             tmp = v_softmax(logits, tok.vocab_size);
-            memcpy(logits, tmp, sizeof(Value*)*MAX_VOCAB);
+            memcpy(logits, tmp, sizeof(Value*) * tok.vocab_size);
             free(tmp);
             loss = v_add(loss, v_neg(v_log(logits[tokens[i+1]])));
         }
@@ -686,7 +683,6 @@ int main() {
             }
         }
     }
-
     printf("\n--- inference (new, hallucinated names) ---\n");
     {
         size_t sample_idx = 0;
@@ -708,7 +704,7 @@ int main() {
                     logits[j] = v_double_div(logits[j], TEMPERATURE); 
                 }
                 tmp = v_softmax(logits, tok.vocab_size);
-                memcpy(logits, tmp, sizeof(Value*)*MAX_VOCAB);
+                memcpy(logits, tmp, sizeof(Value*)*tok.vocab_size);
                 free(tmp);
                 for(j = 0; j < tok.vocab_size; j++) {
                     probs[j] = logits[j]->data;   
@@ -735,6 +731,8 @@ int main() {
         }
         free(data);
         free_network(net);
+        free(opt.m);
+        free(opt.v);
     }
     return 0;
 }
