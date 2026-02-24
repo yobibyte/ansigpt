@@ -258,7 +258,6 @@ typedef struct {
     Matrix *wpe;    
     Matrix *lm_head;    
     Layer **layers;
-    Value **params;
     size_t n_params;
 } Network;
 
@@ -490,7 +489,7 @@ size_t get_data(char ***result) {
     return data_size;
 }
 
-Value **v_linear(Value **x, Matrix *w, size_t n, size_t k) {
+void v_linear(Value **x, Matrix *w, size_t n, size_t k, Value **res) {
     /* This is only to multiply vec of N elems by a matrix of KxN elems.
      *                  m11 .. m1k 
      * x1 x2 .. xn x    m21 .. m2k  
@@ -498,7 +497,6 @@ Value **v_linear(Value **x, Matrix *w, size_t n, size_t k) {
      *                      .. 
      *                  mn1 .. mnk
      */
-    Value **res = malloc(sizeof(Value*) * k);
     size_t i, j;
     for (i = 0; i < k; i++) {
         Value *elem = v_from_double(0., &comp_pool);
@@ -507,7 +505,6 @@ Value **v_linear(Value **x, Matrix *w, size_t n, size_t k) {
         }
         res[i] = elem;
     }
-    return res;
 }
 Value **v_softmax(Value **logits, size_t n) {
     size_t i;
@@ -544,13 +541,13 @@ Value **v_rmsnorm(Value **x, size_t n) {
     return res; 
 }
 
-Value **gpt(size_t token_id, size_t pos_id, Network *net, Value *keys[N_LAYER][BLOCK_SIZE][N_EMBD], Value *values[N_LAYER][BLOCK_SIZE][N_EMBD], size_t vocab_size) {
+void gpt(size_t token_id, size_t pos_id, Network *net, Value *keys[N_LAYER][BLOCK_SIZE][N_EMBD], Value *values[N_LAYER][BLOCK_SIZE][N_EMBD], size_t vocab_size, Value *logits[MAX_VOCAB]) {
     /* t is the time dimension, in microgpt, they send keys/values and we can read lens of those.
      * Here we use t to track that. 
      */
     Value **x = malloc(sizeof(Value*) * N_EMBD);
     Value **x_residual;
-    Value **q, **k, **v;
+    Value *q[N_EMBD], *v[N_EMBD], *k[N_EMBD];
     Value *qk_prod[HEAD_DIM];
     Value *x_attn[N_HEAD*HEAD_DIM];
     size_t i;
@@ -565,9 +562,9 @@ Value **gpt(size_t token_id, size_t pos_id, Network *net, Value *keys[N_LAYER][B
 
         x_residual = x;
         x = v_rmsnorm(x, N_EMBD);
-        q = v_linear(x, layer->attn_wq, N_EMBD, N_EMBD);
-        k = v_linear(x, layer->attn_wk, N_EMBD, N_EMBD);
-        v = v_linear(x, layer->attn_wv, N_EMBD, N_EMBD);
+        v_linear(x, layer->attn_wq, N_EMBD, N_EMBD, q);
+        v_linear(x, layer->attn_wk, N_EMBD, N_EMBD, k);
+        v_linear(x, layer->attn_wv, N_EMBD, N_EMBD, v);
         for(i = 0; i < N_EMBD; i++) {
             keys[layer_idx][pos_id][i] = k[i];
             values[layer_idx][pos_id][i] = v[i];
@@ -592,22 +589,22 @@ Value **gpt(size_t token_id, size_t pos_id, Network *net, Value *keys[N_LAYER][B
                 x_attn[hs + id] = v_sum(head_attn_weights, pos_id + 1);
             }
         }
-        x = v_linear(x_attn, layer->attn_wo, N_EMBD, N_EMBD);
+        v_linear(x_attn, layer->attn_wo, N_EMBD, N_EMBD, x);
         for(i = 0; i < N_EMBD; i++) {
             x[i] = v_add(x[i], x_residual[i]);
         }
         x_residual = x; /* 2) MLP block */
         x = v_rmsnorm(x, N_EMBD);
-        x = v_linear(x, layer->mlp_fc1, N_EMBD, N_EMBD);
+        v_linear(x, layer->mlp_fc1, N_EMBD, N_EMBD, x);
         for(i = 0; i < N_EMBD; i++) {
             x[i] = v_relu(x[i]);
         }
-        x = v_linear(x, layer->mlp_fc2, N_EMBD, N_EMBD);
+        v_linear(x, layer->mlp_fc2, N_EMBD, N_EMBD, x);
         for(i = 0; i < N_EMBD; i++) {
             x[i] = v_add(x[i], x_residual[i]);
         }
     }
-    return v_linear(x, net->lm_head, N_EMBD, vocab_size);
+    v_linear(x, net->lm_head, N_EMBD, vocab_size, logits);
 }
 
 int main() {
@@ -622,6 +619,7 @@ int main() {
     Adam opt;
     Value *keys[N_LAYER][BLOCK_SIZE][N_EMBD];
     Value *values[N_LAYER][BLOCK_SIZE][N_EMBD];
+    Value *logits[MAX_VOCAB];
 
     srand(42);
     data_size = get_data(&data);
@@ -644,7 +642,6 @@ int main() {
     printf("num params: %lu\n", net->n_params);
 
     for(step = 0; step < TRAIN_STEPS; step++) {
-        Value **logits;
         size_t n, n_toks;
         size_t i;
         comp_pool.idx = 0; /* Reset comp_pool for non-weight nodes */
@@ -655,8 +652,8 @@ int main() {
         tokens = tokenize(cur_data, &tok);
 
         for(i = 0; i < n - 1; i++) {
-            logits = gpt(tokens[i], i, net, keys, values, tok.vocab_size);
-            logits = v_softmax(logits, tok.vocab_size);
+            gpt(tokens[i], i, net, keys, values, tok.vocab_size, logits);
+            memcpy(logits, v_softmax(logits, tok.vocab_size), sizeof(Value*)*MAX_VOCAB);
             loss = v_add(loss, v_neg(v_log(logits[tokens[i+1]])));
         }
         loss = v_double_div(loss, n);
@@ -683,7 +680,6 @@ int main() {
     {
         size_t sample_idx = 0;
         size_t token_id = 0;
-        Value **logits;
         double probs[MAX_VOCAB];
         char *sampled_text;
         size_t tokens[BLOCK_SIZE];
@@ -695,11 +691,11 @@ int main() {
             token_id = tok.bos;
 
             for(i = 0; i < BLOCK_SIZE; i++) {
-                logits = gpt(token_id, i, net, keys, values, tok.vocab_size);
+                gpt(token_id, i, net, keys, values, tok.vocab_size, logits);
                 for(j = 0; j < tok.vocab_size; j++) {
                     logits[j] = v_double_div(logits[j], TEMPERATURE); 
                 }
-                logits = v_softmax(logits, tok.vocab_size);
+                memcpy(logits, v_softmax(logits, tok.vocab_size), sizeof(Value*)*MAX_VOCAB);
                 for(j = 0; j < tok.vocab_size; j++) {
                     probs[j] = logits[j]->data;   
                 }
