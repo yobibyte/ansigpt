@@ -108,10 +108,9 @@ Value *v_double_add(Value *v, double other) {
 }
 
 Value *v_mul(Value *v, Value *other) {
-    Value *res = &comp_pool.data[comp_pool.idx++];
+    Value *res = v_from_double(v->data * other->data, &comp_pool);
     res->grad = 0;
     res->visited = 0;
-    res->data = v->data * other->data;
     res->num_children = 2;
     res->children[0] = v;
     res->children[1] = other;
@@ -149,8 +148,7 @@ Value *v_double_div(Value *v, double other) {
 }
 
 Value *v_log(Value *v) {
-    Value *res = v_from_double(v->data, &comp_pool);
-    res->data = log(v->data);
+    Value *res = v_from_double(log(v->data), &comp_pool);
     res->num_children = 1;
     res->children[0] = v;
     res->local_grads[0] = 1 / v->data;
