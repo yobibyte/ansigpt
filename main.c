@@ -18,7 +18,7 @@
 #define BLOCK_SIZE 16  /* max seq len */
 #define HEAD_DIM (N_EMBD / N_HEAD)
 
-#define TRAIN_STEPS 1000
+#define TRAIN_STEPS 10
 #define LR 0.01
 #define BETA1 0.85
 #define BETA2 0.99
@@ -264,15 +264,7 @@ Network *init_network(size_t vocab_size) {
     Layer **layers = malloc(sizeof(Layer*) * N_LAYER);
     Layer *cur_layer;
     size_t layer_idx = 0;
-    size_t n_params = 0;
     
-    n_params += vocab_size * N_EMBD;
-    n_params += BLOCK_SIZE * N_EMBD;
-    n_params += vocab_size * N_EMBD;
-    n_params += 4*N_EMBD*N_EMBD*N_LAYER;
-    n_params += 4*N_EMBD*N_EMBD*N_LAYER;
-    n_params += 4*N_EMBD*N_EMBD*N_LAYER;
-
     /* n_out x n_in */
     net->wte = get_weight_matrix(vocab_size, N_EMBD);
     net->wpe = get_weight_matrix(BLOCK_SIZE, N_EMBD);
@@ -290,9 +282,27 @@ Network *init_network(size_t vocab_size) {
 
     }
     net->layers = layers;
-    net->n_params = n_params;
+    net->n_params = w_pool.idx;
 
     return net;
+}
+
+void free_network(Network *net) {
+    size_t layer_idx;
+    free(net->wte);
+    free(net->wpe);
+    free(net->lm_head);
+    /* We do not need to free the Value items as they are in the pool.*/
+    for(layer_idx = 0; layer_idx < N_LAYER; layer_idx++) {
+        free(net->layers[layer_idx]->attn_wq);
+        free(net->layers[layer_idx]->attn_wk);
+        free(net->layers[layer_idx]->attn_wv);
+        free(net->layers[layer_idx]->attn_wo);
+        free(net->layers[layer_idx]->mlp_fc1);
+        free(net->layers[layer_idx]->mlp_fc2);
+        free(net->layers[layer_idx]);
+    }
+    free(net);
 }
 
 typedef struct {
@@ -710,6 +720,7 @@ int main() {
             free(data[i]);
         }
         free(data);
+        free_network(net);
     }
     return 0;
 }
