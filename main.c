@@ -1,6 +1,4 @@
-/* Microgpt from scratch in ANSI C by @y0b1byte
- * I compiled this with `gcc -std=c89 -pedantic -Wall -Wextra main.c -lm -g -o gpt`
- */
+/* Microgpt from scratch in ANSI C by @y0b1byte */
 
 #include <assert.h>
 #include <stdio.h>
@@ -110,8 +108,6 @@ Value *v_double_add(Value *v, double other) {
 
 Value *v_mul(Value *v, Value *other) {
     Value *res = v_from_double(v->data * other->data, &comp_pool);
-    res->grad = 0;
-    res->visited = 0;
     res->num_children = 2;
     res->children[0] = v;
     res->children[1] = other;

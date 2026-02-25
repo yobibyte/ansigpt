@@ -1,1 +1,1 @@
-gcc -std=c89 -pedantic -Wall -Wextra main.c -lm -g -o gpt
+gcc -std=c89 -O3 -pedantic -Wall -Wextra main.c -lm -o gpt
