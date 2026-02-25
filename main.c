@@ -1,5 +1,5 @@
 /* Microgpt from scratch in ANSI C by @y0b1byte
- * I compiled this with `gcc -std=gnu89 -pedantic -Wall -Wextra main.c -lm -g -o gpt`
+ * I compiled this with `gcc -std=c89 -pedantic -Wall -Wextra main.c -lm -g -o gpt`
  */
 
 #include <assert.h>
@@ -29,7 +29,8 @@
 #define TEMPERATURE 0.5 
 #define INFERENCE_SAMPLES 20
 
-#define TWO_PI (M_PI*2)
+#define PI 3.14159265358979323846
+#define TWO_PI (PI*2)
 
 double standard_normal() {
     /* 
