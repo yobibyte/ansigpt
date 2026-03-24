@@ -435,13 +435,11 @@ size_t sample(double* probs, size_t n) {
 }
 
 size_t get_data(char ***result) {
-    /* We will download the data in the next version of this program. 
-
-    For now, get it from:
-        https://raw.githubusercontent.com/karpathy/makemore/refs/heads/master/names.txt
-    */
-
     FILE *f = fopen("names.txt", "r");
+    if (f == NULL) {
+        fprintf(stderr, "You need to download the training data from https://raw.githubusercontent.com/karpathy/makemore/refs/heads/master/names.txt\n");
+        exit(1);
+    }
     char **data;
     char buf[1024];
     unsigned int data_size = 0;
@@ -610,7 +608,7 @@ void gpt(size_t token_id, size_t pos_id, Network *net, Value *keys[N_LAYER][BLOC
     free(x);
 }
 
-int main() {
+int main(void) {
     char **data = 0;
     char *cur_data;
     size_t *tokens;
